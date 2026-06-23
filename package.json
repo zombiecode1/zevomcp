@@ -1,0 +1,25 @@
+{
+  "name": "zombiecoder-mcp",
+  "version": "1.0.1",
+  "description": "ZombieCoder MCP Server — Sahon Srabon / Developer Zone / Dhaka, Bangladesh",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "mcp-use": "latest",
+    "@langchain/openai": "latest",
+    "@langchain/core": "latest",
+    "langchain": "latest",
+    "dotenv": "^16.4.5",
+    "uuid": "^9.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/uuid": "^9.0.8",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.4.5"
+  }
+}
