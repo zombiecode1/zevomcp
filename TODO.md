@@ -1,134 +1,125 @@
-# 🧟 ZevO MCP — TODO & Current State
+# 🧟 ZevO MCP — Current State & Roadmap
+
+**Last Updated:** 2026-06-23 23:45 BDT  
+**Session Focus:** Client Session Verification Architecture Discussion  
+**Key Realization:** "সব এডিটর ইলেকট্রন = ব্রাউজার" — তাই সকলের জন্য **browser-based verification** হওয়া উচিত
 
 ---
 
-## ✅ সম্পন্ন (Done)
+## ✅ Completed (Working)
 
-### Phase 1: Foundation
-- [x] Multi-provider MCP server with 6 AI providers
+### Core Server
+- [x] Multi-provider MCP server — 6 providers (4 online)
 - [x] 7 MCP tools (ping_agent, create_session, verify_session, run_agent, list_providers, list_clients, get_run_details)
 - [x] OpenAI-compatible proxy (`/v1/*`)
-- [x] SQLite-backed session management with TTL/heartbeat
-- [x] Live dashboard with auto-refresh
-- [x] Database audit trail (5 tables: providers, app_sessions, mcp_clients, agent_runs, metrics)
+- [x] SQLite-backed session management (24h TTL, heartbeat)
 
-### Phase 2: Structure & Build
-- [x] TypeScript file structure fix (root → `src/` subdirectories)
-- [x] Import path consistency resolved
-- [x] `tsconfig.json` — `rootDir: ./src`, `mnt/` excluded
-- [x] `npm run build` → zero errors
-- [x] Old/duplicate files moved to `~/Desktop/File/zombiemcp-old/`
+### Authentication & Security
+- [x] Auth middleware — SHA-256 timing-safe comparison (X-API-Key / Bearer)
+- [x] Scope-based access control (`proxy:read`, `proxy:write`, `tools:call`, `admin`)
+- [x] AES-256-GCM encryption for stored secrets
+- [x] Protected routes: `/v1/*`, `/metrics`
+- [x] Public routes: `/status`, `/dashboard`, `/live`
 
-### Phase 3: Resilience
-- [x] `list_providers` boolean/string union fix (MCP error -32602)
-- [x] Runtime response logger (`src/logger/`) — auto JSON logging per tool call
-- [x] Systemd service — auto-start on boot
+### Observability
+- [x] Live dashboard with 3s auto-refresh
+- [x] JSON file logger (success/failed/system per day)
+- [x] `/live` lightweight polling endpoint
+- [x] Editor auto-detection (VS Code, IntelliJ, Hermes, OpenCode)
+
+### Infrastructure
+- [x] Systemd service — active + enabled (auto-start on boot)
 - [x] Apache reverse proxy — `m.zombiecoder.my.id:80` → `localhost:5500`
+- [x] MCP_STDIO_MODE for editor integration
+- [x] `npm run build` → zero errors (`tsc`)
 
-### Phase 4: Documentation
-- [x] Digital Ethics Primer
-- [x] Governance Framework
-- [x] Brand Strategy
-- [x] 5-Step Resolution Process
-- [x] Learning journal (2026-06-23)
+### Documentation
+- [x] README.md — full project docs
+- [x] AGENT_LOGIC.md — complete architecture breakdown
+- [x] doc/session-architecture-discussion.html — discussion log
+- [x] doc/Digital Ethics Primer.md, Governance Framework.md, Brand Strategy.md
+- [x] exam/2026-06-23/learning-journal.md — daily learning
 
----
-
-## 🔴 এখনই করা দরকার (High Priority)
-
-### Security
-- [ ] **Authentication middleware** — API key validation for all endpoints (currently open to anyone)
-- [ ] **Rate limiting** — token bucket or sliding window to prevent abuse
-- [ ] **API key encryption at rest** — `.env` keys are currently plain text
-- [ ] **CORS restrict** — change `origin: "*"` to specific allowed origins
+### Git
+- [x] 3 commits on `main`
+- [x] Pushed to `github.com/zombiecode1/zevomcp`
 
 ---
 
-## 🟡 শীঘ্রই করা উচিত (Medium Priority)
+## 🔴 Phase 1: Client Session Infrastructure (NEXT)
 
-### Streaming & Performance
-- [ ] **Proxy SSE real-time streaming** — currently buffers full response; should stream token-by-token
-- [ ] **Dashboard SSE upgrade** — replace 25s polling with live SSE/WebSocket
+| Task | Details | Priority |
+|------|---------|:--------:|
+| `client_sessions` table | UUID PK, client_id, client_name, type, status, verification_code, ip, expires_at, metadata | **HIGH** |
+| `conversations` table | UUID PK, client_session_id FK, title, status, prompt_count | **HIGH** |
+| `agent_runs` migration | ADD COLUMN conversation_id FK → conversations | **HIGH** |
+| `recordMcpClient()` rewrite | Generate persistent client_id, store in localStorage | **HIGH** |
+| `createClientSession()` | Status machine: pending → verified → active | **HIGH** |
 
-### DevOps
-- [ ] **CI/CD** — GitHub Actions for build + test
-- [ ] **Dockerfile** — containerized deployment
-- [ ] **Health check endpoint** — `/health` for monitoring services
-- [ ] **Prometheus metrics** — expose `/metrics` in Prometheus format
+## 🟡 Phase 2: Browser Verification Flow
 
-### Code Quality
-- [ ] **Unit tests** — Vitest for tools, runner, session manager
-- [ ] **Integration tests** — full MCP protocol flow
-- [ ] **TypeScript strict mode audit** — remove `@ts-ignore` / `any` types
+| Task | Details | Priority |
+|------|---------|:--------:|
+| `/verify/:code` HTML page | Show client info, [Approve] [Reject] buttons | **HIGH** |
+| POST `/verify/:code` API | Approve → status=verified, Reject → status=disconnected | **HIGH** |
+| Auto-open browser on connect | Client receives verify_url, opens in default browser | **HIGH** |
+| localStorage 24h save | Session token → localStorage → auto-reconnect | **HIGH** |
+| Heartbeat on verified | 30s interval, extends session TTL | **HIGH** |
 
----
+## 🟡 Phase 3: Non-Technical UX
 
-## 🟢 ভবিষ্যতে (Low Priority / Nice to Have)
+| Task | Details | Priority |
+|------|---------|:--------:|
+| Client list in dashboard | Status badges (pending/verified/disconnected) | **MEDIUM** |
+| Manual approve/reject buttons | Helper, not primary | **MEDIUM** |
+| Error messages in বাংলা | All user-facing errors in Bangla | **MEDIUM** |
 
-- [ ] **.env.example** template ✅ (done)
-- [ ] **SSE → WebSocket** upgrade for dashboard
-- [ ] **Admin CLI** — `zevomcp status`, `zevomcp logs`, `zevomcp providers`
-- [ ] **Plugin system** — dynamic tool loading
-- [ ] **Multi-user support** — isolated session spaces
-- [ ] **Model fallback chain** — if primary provider fails, try next
-- [ ] **Webhook notifications** — on agent run completion
+## 🟢 Phase 4: Hardcoded Values → Configurable
 
----
-
-## 📊 Current State (2026-06-23)
-
-```
-Source files:    11 .ts files (1,264 lines)
-Output files:    33 dist files (.js + .d.ts + .map)
-Build:           tsc → zero errors ✅
-Runtime:         systemd → active (enabled) ✅
-Proxy:           Apache → m.zombiecoder.my.id:80 ✅
-Logger:          JSON log files → logs/{date}/{type}/ ✅
-Providers:       6 configured, 4 online, 2 offline
-Agent:           LangChain MCPAgent + ChatOpenAI with streaming
-Sessions:        SQLite-backed, 24h TTL, heartbeat
-```
+| File | Line | Current | Fix |
+|------|:----:|---------|-----|
+| `src/config.ts` | 20 | `["GROQBRIDGE","OPENCODE","GOOGLE","OLLAMA","GROQ","LOCAL"]` | Dynamic from .env |
+| `src/providers/registry.ts` | 30 | `AbortSignal.timeout(8000)` | Configurable via .env |
+| `src/routes/status.ts` | 240 | `const B='http://localhost:${port}'` | Dynamic from host config |
 
 ---
 
-## 🔗 Quick Reference
+## 📊 Current Metrics (2026-06-23 23:45)
 
-```
-Local MCP:      http://localhost:5500/mcp
-Local SSE:      http://localhost:5500/sse
-Local Proxy:    http://localhost:5500/v1
-Local Dashboard: http://localhost:5500/dashboard
-Remote:         https://m.zombiecoder.my.id/ (Apache proxy)
-Status:         http://localhost:5500/status
-Metrics:        http://localhost:5500/metrics
-Logs:           ./logs/YYYY-MM-DD/{success,failed,system}/
-Database:       ./zombiecoder.db (SQLite)
-```
-
----
-
-## 🧪 How to Test
-
-```bash
-# Health check
-curl http://localhost:5500/status
-
-# List providers
-curl -X POST http://localhost:5500/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_providers","arguments":{"refresh":"true"}}}'
-
-# Run agent
-curl -X POST http://localhost:5500/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_agent","arguments":{"prompt":"Hello, what can you do?","streaming":false}}}'
-
-# Check logs
-ls -la logs/$(date +%Y-%m-%d)/success/
-ls -la logs/$(date +%Y-%m-%d)/failed/
-```
+| Metric | Value |
+|--------|-------|
+| Source files | 13 `.ts` files (1,865 lines) |
+| Build | `tsc` → zero errors |
+| Runtime | systemd active (uptime: 47m) |
+| MCP clients | 1 (VS Code v1.120.0) |
+| App sessions | 4 active |
+| Providers | 6 configured, 4 online |
+| Logger | 14 system logs, 1 success log |
+| Memory | 51 MB heap |
+| Git | 3 commits on main |
 
 ---
 
-> *"যেখানে কোড ও কথা বলে, সমস্যাগুলো নিজের কাঁধে তোলে।"*  
-> — **ZombieCoder Dev Agent, Developer Zone, Dhaka, Bangladesh**
+## 💡 Key Learnings (2026-06-23)
+
+1. **VS Code / IntelliJ / Hermes সব Electron = Browser**
+   - "লোকাল" বলে কিছু নেই — সব ওয়েবভিত্তিক
+   - তাই **সবার জন্য browser-based verification**
+
+2. **মূল কাজ = চাবি তৈরির সিস্টেম**
+   - আমরা এমন ফাংশন লিখব যে একটি চাবি তৈরি করে
+   - চাবি সঠিক হলে দরজা খুলে
+   - Client জানবে আপনি authentic user
+
+3. **Auto-verification > Manual button**
+   - বাটন হেল্পার হিসেবে থাকতে পারে
+   - কিন্তু মূল মেকানিজম automatic browser verification
+
+4. **Server এর responsibility**
+   - ইউজার ভুলে গেলেও সার্ভার ভুলবে না
+   - Automatic heartbeat → session validity check
+
+---
+
+> *"আমরা চাবি তৈরির সিস্টেম বানাচ্ছি। সব এডিটর ইলেকট্রন = ব্রাউজার। ক্লায়েন্ট অটো ব্রাউজার খুলবে, ভেরিফাই করবে, localStorage-এ সেভ করবে, heartbeat চালাবে।"*  
+> — **ভাইয়া, 2026-06-23**

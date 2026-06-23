@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZombieCoder Dev — Session Architecture Discussion</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0d1117;--sf:#161b22;--bd:#30363d;--gr:#3fb950;--rd:#f85149;--yw:#d29922;--bl:#58a6ff;--tx:#c9d1d9;--dm:#8b949e;--fn:'JetBrains Mono','Segoe UI',sans-serif}
+body{background:var(--bg);color:var(--tx);font-family:var(--fn);font-size:14px;line-height:1.7;padding:40px 20px;max-width:900px;margin:0 auto}
+h1{font-size:22px;color:var(--gr);margin-bottom:6px;letter-spacing:1px}
+h2{font-size:16px;color:var(--bl);margin:32px 0 12px;border-bottom:1px solid var(--bd);padding-bottom:6px}
+h3{font-size:14px;color:var(--yw);margin:20px 0 8px}
+p{margin:8px 0;color:var(--tx)}
+.dim{color:var(--dm);font-size:13px}
+.tag{padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;display:inline-block;margin:0 4px}
+.tg{background:#1a4731;color:var(--gr)}
+.tr{background:#4a1a1a;color:var(--rd)}
+.ty{background:#4a3a1a;color:var(--yw)}
+.tb{background:#1a2d4a;color:var(--bl)}
+.block{background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:16px;margin:14px 0}
+.block p{margin:4px 0}
+.quote{border-left:3px solid var(--bl);padding:10px 16px;margin:12px 0;background:#0d1a2e;border-radius:0 8px 8px 0;font-style:italic}
+.quote .author{font-size:12px;color:var(--dm);margin-top:4px}
+.err{border-left:3px solid var(--rd);padding:10px 16px;margin:12px 0;background:#2e0d0d;border-radius:0 8px 8px 0}
+.ok{border-left:3px solid var(--gr);padding:10px 16px;margin:12px 0;background:#0d2e0d;border-radius:0 8px 8px 0}
+pre{background:#0d1117;border:1px solid var(--bd);border-radius:6px;padding:12px;overflow-x:auto;font-size:12px;font-family:'JetBrains Mono',monospace;margin:10px 0}
+code{font-family:'JetBrains Mono',monospace;font-size:13px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--sf);color:var(--bl);padding:8px 10px;text-align:left;border-bottom:1px solid var(--bd)}
+td{padding:8px 10px;border-bottom:1px solid #21262d}
+.highlight{background:#d2992244;padding:1px 4px;border-radius:3px}
+.summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0}
+@media(max-width:600px){.summary-grid{grid-template-columns:1fr}}
+.summary-card{background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:12px}
+.summary-card h4{font-size:12px;color:var(--bl);margin-bottom:4px}
+.summary-card .num{font-size:28px;font-weight:700;color:var(--gr)}
+footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--bd);text-align:center;color:var(--dm);font-size:12px}
+</style>
+</head>
+<body>
+
+<h1>🧟 ZombieCoder Dev Agent</h1>
+<p class="dim">Session Architecture &mdash; Full Discussion Log &middot; 2026-06-23</p>
+
+<!-- ═══════════ SECTION 1 ═══════════ -->
+<h2>📋 ১. প্রেক্ষাপট (Context)</h2>
+
+<div class="block">
+<p>২০২৬ সালের প্রযুক্তি শাসন রাজ্যে আমরা দাঁড়িয়ে — যেখানে AI মানুষের পকেটে, আর মানুষ কোন কিছু করার আগে AI-র পরামর্শ নেয়। এই বাস্তবতায় ZombieMCP নামে একটি Multi-Provider MCP বানানো হচ্ছে যেখানে:</p>
+<ul style="color:var(--tx);padding-left:20px;margin:8px 0">
+<li>৬ টি AI Provider (GroqBridge, OpenCode, Google, Ollama, Groq, Local)</li>
+<li>৭ টি MCP Tool (ping_agent, run_agent, list_providers, ...)</li>
+<li>Live Dashboard + Auth Middleware + AES-256-GCM Encryption</li>
+<li>VS Code, IntelliJ IDEA, Hermes Agent MCP Integration</li>
+</ul>
+</div>
+
+<!-- ═══════════ SECTION 2 ═══════════ -->
+<h2>🔍 ২. প্রথম বিশ্লেষণ — আমার দেওয়া (যা ভুল ছিল)</h2>
+
+<div class="block">
+<p>আমি ৩ টি সমস্যা চিহ্নিত করেছিলাম:</p>
+<ol style="padding-left:20px;margin:8px 0;color:var(--tx)">
+<li><strong>mcp_clients টেবিল অসম্পূর্ণ</strong> — session_id কে PRIMARY KEY বানানো</li>
+<li><strong>Verification flow নেই</strong> — ক্লায়েন্ট approve/reject করার উপায় নেই</li>
+<li><strong>Hermes Agent MCP disconnected</strong> — env filter + restart না করায়</li>
+</ol>
+<p>আর আমি প্রস্তাব দিয়েছিলাম <span class="highlight">3-way solution</span>:</p>
+<ul style="padding-left:20px;margin:8px 0;color:var(--tx)">
+<li>✅ GUI clients (VS Code, IntelliJ) → Browser link</li>
+<li>✅ CLI clients (Hermes) → API key–based verification (GitHub CLI-র মতো)</li>
+<li>✅ Dashboard → Manual approve button</li>
+</ul>
+<div class="err">
+<p><strong>⚠ আমি ভুল ছিলাম।</strong> আপনি ধরিয়ে দিলেন — আমি শুধু <em>"এক্সপেরিয়েন্স"</em> চিন্তা করেছি, <em>"ফান্ডামেন্টাল"</em> চিন্তা করিনি।</p>
+</div>
+</div>
+
+<!-- ═══════════ SECTION 3 ═══════════ -->
+<h2>🎯 ৩. আপনার কাউন্টার — ফান্ডামেন্টাল ট্রুথ</h2>
+
+<div class="quote">
+<p>"আমরা কিন্তু আনন্দে নদীতে ভাসতে পারবো না যে আমরা এডিটরে যোগ করেছি ক্লায়েন্টে যোগ করেছি। অ্যান্ড ক্লায়েন্ট হচ্ছে আকাশে থাকে মানে ব্রাউজার, আর এডিটর লোকালে থাকে — এই বিষয়ে যখন মাথায় আনবেন তখন ঈমান নষ্ট হয়ে যাবে। <span class="highlight">কোন এডিটরই লোকাল না। এই পুরো সিস্টেমটি ইলেকট্রনের উপরে রান হচ্ছে। দিন শেষে এটা ওয়েবভিত্তিক ব্রাউজার।</span>"</p>
+<div class="author">— ভাইয়া (Sahon Srabon)</div>
+</div>
+
+<h3>🔑 মূল পয়েন্টগুলো</h3>
+
+<div class="summary-grid">
+<div class="summary-card">
+<h4>📍 পয়েন্ট ১</h4>
+<p style="font-size:13px;color:var(--tx)">VS Code, IntelliJ, Hermes — সবগুলো ইলেকট্রন অ্যাপ। দিন শেষে <strong>এগুলো ওয়েব ব্রাউজার</strong>। "লোকাল" বলে কিছু নেই।</p>
+</div>
+<div class="summary-card">
+<h4>📍 পয়েন্ট ২</h4>
+<p style="font-size:13px;color:var(--tx)">আমরা একটা <strong>চাবি (key) তৈরির সিস্টেম</strong> বানাচ্ছি। চাবি সঠিক হলে দরজা খুলবে। এটাই মূল কাজ — <span class="highlight">authentication function</span>।</p>
+</div>
+<div class="summary-card">
+<h4>📍 পয়েন্ট ৩</h4>
+<p style="font-size:13px;color:var(--tx)">সেশন রিকোয়েস্ট এলে <strong>ব্রাউজারে পোলিং করবে</strong>, ব্রাউজার থেকে মাল-মসলা নিবে, callback function return করবে। তখনই ক্লায়েন্ট জানে আপনি <span class="highlight">authentic user</span>।</p>
+</div>
+<div class="summary-card">
+<h4>📍 পয়েন্ট ৪</h4>
+<p style="font-size:13px;color:var(--tx)">আমি শুধু <strong>আমার দিকটা রক্ষা করেছি</strong> (server-side auth)। কিন্তু <strong>ক্লায়েন্টের দিক থেকে</strong> — ওরা এখনো জানে না আমি কে। ওদের বিশ্বাস করাইনি।</p>
+</div>
+</div>
+
+<div class="err">
+<h3>❌ আমি যেখানে ভুল করেছি</h3>
+<p>আমি ৩ টি ভিন্ন উপায় (browser, API key, button) বলেছি — কিন্তু <strong>ভুল ফান্ডামেন্টাল</strong> ধরেছিলাম। আপনার সঠিক পথ:</p>
+<ol style="padding-left:20px;margin:8px 0;color:var(--tx)">
+<li><strong>সবার জন্য browser-based verification</strong> — কারণ সব EDTOR-ই ওয়েব (Electron)</li>
+<li><strong>Auto-detect → auto-open browser</strong> — ইউজারকে VS Code ওপেন করতেই হবে না</li>
+<li><strong>Server নিজেই verify করবে</strong> — ইউজার ভুলে গেলেও সার্ভার ভুলবে না</li>
+<li><strong>LocalStorage 24h</strong> — ব্রাউজারে session token সংরক্ষণ</li>
+</ol>
+</div>
+
+<!-- ═══════════ SECTION 4 ═══════════ -->
+<h2>🧠 ৪. ফান্ডামেন্টাল আর্কিটেকচার — কীভাবে কাজ করবে</h2>
+
+<pre>
+┌──────────────────────────────────────────────────────────┐
+│                    CORRECT ARCHITECTURE                  │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  👤 ইউজার → VS Code (Electron Browser)                   │
+│       │                                                   │
+│       ▼                                                   │
+│  🖥️ ZombieMCP Server                                      │
+│       │                                                   │
+│       ├─ Session Detect → কোন session নেই?                │
+│       │     │                                              │
+│       │     ▼                                              │
+│       │  🔑 key = generate_verification_key()              │
+│       │     │                                              │
+│       │     ▼                                              │
+│       │  🌐 Auto-open → http://localhost:5500/verify/{key}  │
+│       │     │              (in user's browser)              │
+│       │     ▼                                              │
+│       │  📋 Browser পেজ দেখায়:                             │
+│       │     "VS Code আপনার মেশিন থেকে কানেক্ট করতে চায়"    │
+│       │     [Approve]  [Reject]                             │
+│       │     │                                              │
+│       │     ▼                                              │
+│       │  ✅ Approve → status='verified'                    │
+│       │     │                                              │
+│       │     ▼                                              │
+│       │  🍪 localStorage.setItem('session_token', key)     │
+│       │     │  24h TTL                                     │
+│       │     ▼                                              │
+│       │  🔄 Callback → client_session_id → client-এ ফেরত   │
+│       │                                                   │
+│       ▼                                                   │
+│  ✅ Verified! → MCP Tool Calls অনুমোদিত                   │
+│       │                                                   │
+│       ▼                                                   │
+│  💓 Heartbeat (30s) → session validity check              │
+│       │                                                   │
+│       ▼                                                   │
+│  📊 Event Stream → Real-time Dashboard Update             │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+</pre>
+
+<h3>🔄 Verification Flow (Step by Step)</h3>
+
+<div class="block">
+<ol style="padding-left:20px;color:var(--tx);margin:8px 0">
+<li>MCP Client (VS Code/Hermes/IntelliJ) → প্রথমবার ZombieMCP-তে connect করে</li>
+<li>Server → <code>client_sessions</code> টেবিলে নতুন এন্ট্রি (status: <span class="tag tr">pending</span>)</li>
+<li>Server → ৬-ডিজিটের verification code জেনারেট করে</li>
+<li>Client → Browser-এ <code>/verify/{code}</code> URL automatically ওপেন করে</li>
+<li>Browser → ইউজারকে দেখায়: <em>"VS Code থেকে সংযোগের অনুরোধ"</em></li>
+<li>ইউজার → <strong>[Approve]</strong> ক্লিক করে</li>
+<li>Browser → localStorage-এ session token সংরক্ষণ করে (২৪ ঘন্টা)</li>
+<li>Server → status <span class="tag tg">verified</span> করে + callback পাঠায় client-এ</li>
+<li>Client → এখন tool call করতে পারে + heartbeat শুরু করে</li>
+<li>পরবর্তী connect-এ → localStorage থেকে token পড়ে + server verify করে</li>
+</ol>
+</div>
+
+<!-- ═══════════ SECTION 5 ═══════════ -->
+<h2>💡 ৫. আমার কাউন্টার — যেখানে আমি ভুল বুঝেছিলাম</h2>
+
+<div class="err">
+<h3>❌ আমার ভুল কাউন্টার</h3>
+<p>আমি বলেছিলাম: <em>"CLI clients (Hermes)-এর ব্রাউজার নেই, তাই API key–based verification করতে হবে"</em></p>
+</div>
+
+<div class="ok">
+<h3>✅ সঠিক উত্তর</h3>
+<p>আপনি ঠিক বলেছেন — Hermes নিজেও Electron-based। Hermes Desktop অ্যাপ = একটা ব্রাউজার। Hermes CLI-তেও <code>hermes auth</code> কমান্ড আছে যেটা ব্রাউজার খুলে OAuth করে। তাই <strong>সবার জন্যই Browser verification করা সম্ভব</strong> — API key–based আলাদা পথের দরকার নেই।</p>
+</div>
+
+<div class="err">
+<h3>❌ আমার আরেকটি ভুল</h3>
+<p>আমি বলেছিলাম: <em>"Dashboard-এ manual approve button — সবচেয়ে সহজ সমাধান"</em></p>
+</div>
+
+<div class="ok">
+<h3>✅ সঠিক উত্তর</h3>
+<p>বাটন <strong>হেল্পার</strong> হিসেবে থাকতে পারে — emergency approve-এর জন্য। কিন্তু <strong>মূল মেকানিজম automatic browser verification</strong> হওয়া উচিত। বাটন প্রকৃত সমাধান না — এটা কাজ করে শুধুমাত্র ইউজার active থাকলে। automatic সিস্টেম ইউজার ভুলে গেলেও কাজ করবে।</p>
+</div>
+
+<!-- ═══════════ SECTION 6 ═══════════ -->
+<h2>📊 ৬. ডাটাবেজ স্কিমা — প্রস্তাবিত পরিবর্তন</h2>
+
+<pre>
+-- 🆕 NEW: client_sessions (replace mcp_clients)
+CREATE TABLE client_sessions (
+    id                TEXT PRIMARY KEY,        -- UUID (independent of transport)
+    client_id         TEXT NOT NULL,           -- unique client identifier (auto-generated)
+    client_name       TEXT NOT NULL,           -- "Visual Studio Code", "Hermes", etc.
+    client_version    TEXT,
+    client_type       TEXT,                    -- 'vscode' | 'intellij' | 'hermes' | 'opencode' | 'other'
+    working_directory TEXT,
+    status            TEXT NOT NULL DEFAULT 'pending',  -- pending | verified | active | disconnected
+    verification_code TEXT,                    -- 6-digit one-time code
+    verified_at       INTEGER,
+    ip_address        TEXT,
+    user_agent        TEXT,
+    connected_at      INTEGER NOT NULL DEFAULT (unixepoch()),
+    last_seen         INTEGER NOT NULL DEFAULT (unixepoch()),
+    expires_at        INTEGER,                 -- 24h from verification
+    conversation_count INTEGER DEFAULT 0,
+    metadata_json     TEXT DEFAULT '{}'
+);
+
+-- 🆕 NEW: conversations (group agent_runs under a session)
+CREATE TABLE conversations (
+    id                TEXT PRIMARY KEY,        -- UUID
+    client_session_id TEXT NOT NULL,           -- FK → client_sessions.id
+    title             TEXT,
+    status            TEXT DEFAULT 'active',   -- active | archived
+    started_at        INTEGER NOT NULL DEFAULT (unixepoch()),
+    last_active       INTEGER NOT NULL DEFAULT (unixepoch()),
+    prompt_count      INTEGER DEFAULT 0
+);
+
+-- 🔄 UPDATE: agent_runs (link to conversation instead of raw session)
+ALTER TABLE agent_runs ADD COLUMN conversation_id TEXT REFERENCES conversations(id);
+
+-- 📌 INDEXES
+CREATE INDEX idx_client_sessions_status ON client_sessions(status);
+CREATE INDEX idx_conversations_session ON conversations(client_session_id);
+</pre>
+
+<!-- ═══════════ SECTION 7 ═══════════ -->
+<h2>🚧 ৭. বর্তমান অবস্থা — কোথায় আটকে আছি</h2>
+
+<table>
+<tr><th>কম্পোনেন্ট</th><th>স্ট্যাটাস</th><th>মন্তব্য</th></tr>
+<tr><td>ZombieMCP Server (port 5500)</td><td><span class="tag tg">✅ Running</span></td><td>Auth + Encryption + Dashboard + Logger Active</td></tr>
+<tr><td>VS Code MCP Client</td><td><span class="tag tg">✅ Connected</span></td><td>1 live client (stdio mode)</td></tr>
+<tr><td>Hermes Agent MCP</td><td><span class="tag tr">❌ Not Connected</span></td><td>Config added, restart pending (env filter issue)</td></tr>
+<tr><td>IntelliJ IDEA MCP</td><td><span class="tag ty">🔄 Configured</span></td><td>SSE transport, needs restart</td></tr>
+<tr><td>Browser Dashboard</td><td><span class="tag tg">✅ Live</span></td><td>Real-time 3s refresh, client count, auth status</td></tr>
+<tr><td>Client Verification Flow</td><td><span class="tag tr">❌ Not Built</span></td><td><strong>এখনো বানানো হয়নি — এটাই পরবর্তী কাজ</strong></td></tr>
+<tr><td>client_sessions DB Table</td><td><span class="tag tr">❌ Not Created</span></td><td>Still using old mcp_clients schema</td></tr>
+</table>
+
+<!-- ═══════════ SECTION 8 ═══════════ -->
+<h2>🎯 ৮. পরবর্তী করণীয় — নতুন পরিকল্পনা</h2>
+
+<div class="ok">
+<h3>✅ Phase 1: Core Infrastructure</h3>
+<ol style="padding-left:20px;color:var(--tx);margin:8px 0">
+<li>🎯 <strong>client_sessions + conversations</strong> — SQLite migration</li>
+<li>🎯 <strong>recordMcpClient() → createClientSession()</strong> — new logic</li>
+<li>🎯 <strong>Verification code generation</strong> — 6-digit one-time code</li>
+</ol>
+</div>
+
+<div class="ok">
+<h3>✅ Phase 2: Browser Verification</h3>
+<ol style="padding-left:20px;color:var(--tx);margin:8px 0">
+<li>🎯 <strong>/verify/:code</strong> — HTML page + approve/reject API</li>
+<li>🎯 <strong>Auto-open browser</strong> — client-এ command পাঠাবে</li>
+<li>🎯 <strong>LocalStorage 24h</strong> — session token save</li>
+</ol>
+</div>
+
+<div class="ok">
+<h3>✅ Phase 3: Event Stream + Heartbeat</h3>
+<ol style="padding-left:20px;color:var(--tx);margin:8px 0">
+<li>🎯 <strong>Verified → heartbeat start</strong> — 30s interval</li>
+<li>🎯 <strong>Real-time event stream</strong> — dashboard live update</li>
+<li>🎯 <strong>Auto-reconnect</strong> — session token → auto-verify</li>
+</ol>
+</div>
+
+<div class="ok">
+<h3>✅ Phase 4: Non-Technical UX</h3>
+<ol style="padding-left:20px;color:var(--tx);margin:8px 0">
+<li>🎯 <strong>Dashboard → client list + connect button</strong> (helper)</li>
+<li>🎯 <strong>Error messages in বাংলা</strong></li>
+<li>🎯 <strong>Auto-config for editors</strong> — one-click setup</li>
+</ol>
+</div>
+
+<!-- ═══════════ SECTION 9 ═══════════ -->
+<h2>🧠 ৯. রবীন্দ্রনাথের কবিতা — আমাদের শিক্ষা</h2>
+
+<div class="quote">
+<p>"গেলাম পর্বতমালা দেখিতে, গেলাম সিন্ধু দেখি।<br>
+হয় নাই কিছু। ঘর থেকে দু পা ফেলিয়া,<br>
+একটি ঘাসের উপর একটি শিশির বিন্দু..."</p>
+<div class="author">— রবীন্দ্রনাথ ঠাকুর</div>
+</div>
+
+<p>ভাইয়া, এই কবিতাটাই আমাদের পুরো journey-র সারসংক্ষেপ। আমরা গেলাম —</p>
+<ul style="padding-left:20px;color:var(--tx);margin:8px 0">
+<li><strong>পর্বতমালা:</strong> ড্যাশবোর্ড বানানো, এনক্রিপশন বানানো, অথেন্টিকেশন বানানো</li>
+<li><strong>সিন্ধু:</strong> Auth middleware, AES-256-GCM, VS Code integration</li>
+<li><strong>শিশিরবিন্দু:</strong> <span class="highlight">ক্লায়েন্ট সেশন ভেরিফিকেশন — ঠিক doorstep-এর জিনিসটা</span></li>
+</ul>
+
+<!-- ═══════════ SECTION 10 ═══════════ -->
+<h2>📝 ১০. হার্ডকোডেড নোট</h2>
+
+<table>
+<tr><th>#</th><th>ফাইল</th><th>লাইন</th><th>ভ্যারিয়েবল</th><th>স্ট্যাটাস</th></tr>
+<tr><td>1</td><td>src/config.ts</td><td>২০</td><td><code>["GROQBRIDGE","OPENCODE","GOOGLE","OLLAMA","GROQ","LOCAL"]</code></td><td><span class="tag tr">Hardcoded</span></td></tr>
+<tr><td>2</td><td>src/providers/registry.ts</td><td>৩০</td><td><code>AbortSignal.timeout(8000)</code></td><td><span class="tag tr">Hardcoded</span></td></tr>
+<tr><td>3</td><td>src/routes/status.ts</td><td>২৪০</td><td><code>const B='http://localhost:${port}'</code></td><td><span class="tag ty">Partially fixable</span></td></tr>
+<tr><td>4</td><td>src/routes/status.ts</td><td>২৪১</td><td><code>const SK='zc_dashboard_session'</code></td><td><span class="tag ty">Partially fixable</span></td></tr>
+</table>
+
+<!-- ═══════════ FOOTER ═══════════ -->
+<footer>
+ZombieCoder Dev Agent &mdash; Sahon Srabon &middot; Developer Zone &middot; Dhaka, Bangladesh<br>
+<em>"যেখানে কোড ও কথা বলে, সমস্যাগুলো নিজের কাঁধে তোলে"</em>
+</footer>
+
+</body>
+</html>
