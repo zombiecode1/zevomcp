@@ -26,7 +26,7 @@ function buildProviders(): ProviderDef[] {
         id,
         name: opt(`PROVIDER_${id}_NAME`, id),
         baseUrl: normaliseUrl(url),
-        apiKey: opt(`PROVIDER_${id}_KEY`, "proxy-no-auth") || "proxy-no-auth",
+        apiKey: opt(`PROVIDER_${id}_KEY`, "proxy-no-auth"),
       };
     })
     .filter((p): p is ProviderDef => p !== null);
@@ -41,7 +41,13 @@ export const config = {
   serverHost:       opt("MCP_SERVER_HOST", "localhost"),
   dbPath:           opt("DB_PATH", "./zombiecoder.db"),
   logDir:           opt("LOG_DIR", "./logs"),
-  providers:        buildProviders(),
+
+  // Auth & encryption (from .env)
+  apiKey:           opt("X_API_KEY", ""),
+  encryptionKey:    opt("ENCRYPTION_KEY", ""),
+
+  // Providers are built from env (no hardcoded list)
+  providers: buildProviders(),
 };
 
 export function getProvider(id?: string): ProviderDef | undefined {

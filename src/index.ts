@@ -7,6 +7,8 @@ import { registerTools } from "./tools/index.js";
 import { registerStatusRoutes } from "./routes/status.js";
 import { registerProxyRoutes } from "./routes/proxy.js";
 import { logInit, logSystem } from "./logger/index.js";
+import { authMiddleware, initAuth } from "./middleware/auth.js";
+import { ensureEncryptionKey } from "./middleware/encryption.js";
 
 const server = new MCPServer({
   name: "zombiecoder-mcp",
@@ -48,6 +50,10 @@ const server = new MCPServer({
 // the documented `ctx.client.info()` API (see src/tools/index.ts), and the
 // full live session list is available any time via `server.sessions`.
 
+// 🔐 Auth middleware — protect proxy & metrics routes
+server.app.use("/v1/*", authMiddleware(["proxy:read", "proxy:write"]));
+server.app.use("/metrics", authMiddleware());
+
 registerTools(server);
 registerProxyRoutes(server);  // /v1/*               — OpenAI-compatible proxy (real Hono wildcard route)
 registerStatusRoutes(server); // /status /metrics ... — dashboard + JSON status endpoints
@@ -55,7 +61,13 @@ registerStatusRoutes(server); // /status /metrics ... — dashboard + JSON statu
 async function main(): Promise<void> {
   getDb();
   logInit();
-  console.log("✓ SQLite ready (node:sqlite, no native build required)");
+
+  // 🔐 Initialize auth system — reads X_API_KEY / X_API_KEY_{1..10} from env
+  initAuth();
+
+  // 🔑 Ensure encryption key exists for storing provider secrets
+  const encKey = ensureEncryptionKey(config.dbPath.replace(/[^/]+$/, ".env"));
+  if (encKey) console.log("✓ Encryption key ready");
 
   syncProviders();
   console.log(`✓ ${config.providers.length} providers synced`);
@@ -71,22 +83,15 @@ async function main(): Promise<void> {
     expireStaleSessions();
   }, 10 * 60 * 1000);
 
-  await server.listen(config.serverPort);
+  const isStdio = process.env["MCP_STDIO_MODE"] === "true";
 
-  const base = `http://${config.serverHost}:${config.serverPort}`;
-  console.log(`
-╔══════════════════════════════════════════════════════════════╗
-║  ZombieCoder MCP  |  Sahon Srabon / Developer Zone           ║
-║  Dhaka, Bangladesh — https://zombiecoder.my.id/              ║
-╠══════════════════════════════════════════════════════════════╣
-║  MCP endpoint   →  ${base}/mcp
-║  MCP SSE        →  ${base}/sse
-║  OpenAI proxy   →  ${base}/v1
-║  Dashboard      →  ${base}/dashboard
-║  Status         →  ${base}/status
-║  Inspector      →  ${base}/inspector
-║  Active provider: ${config.activeProviderId}
-╚══════════════════════════════════════════════════════════════╝`);
+  if (!isStdio) {
+    await server.listen(config.serverPort);
+    const base = `http://${config.serverHost}:${config.serverPort}`;
+    console.log(`\n╔══════════════════════════════════════════════════════════════╗\n║  ZombieCoder MCP  |  Sahon Srabon / Developer Zone           ║\n║  Dhaka, Bangladesh — https://zombiecoder.my.id/              ║\n╠══════════════════════════════════════════════════════════════╣\n║  MCP endpoint   →  ${base}/mcp\n║  MCP SSE        →  ${base}/sse\n║  OpenAI proxy   →  ${base}/v1\n║  Dashboard      →  ${base}/dashboard\n║  Status         →  ${base}/status\n║  Inspector      →  ${base}/inspector\n║  Active provider: ${config.activeProviderId}\n╚══════════════════════════════════════════════════════════════╝`);
+  } else {
+    logSystem("MCP_STDIO_MODE=true — running in stdio-only mode (no HTTP)");
+  }
 }
 
 main().catch((err) => {

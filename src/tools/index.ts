@@ -39,12 +39,13 @@ function withLogging<T>(
 ) {
   return async (params: T, ctx: any): Promise<ReturnType<typeof text | typeof error>> => {
     const t0 = Date.now();
+    const sessionId = ctx?.session?.sessionId ?? "unknown";
     try {
       const result = await fn(params, ctx);
       const durationMs = Date.now() - t0;
       const isError = typeof result === "object" && result !== null && "isError" in result;
       logToolCall({
-        sessionId: ctx.session.sessionId,
+        sessionId,
         toolName,
         args: params as Record<string, unknown>,
         success: !isError,
@@ -57,7 +58,7 @@ function withLogging<T>(
       const durationMs = Date.now() - t0;
       const msg = err instanceof Error ? err.message : String(err);
       logToolCall({
-        sessionId: ctx.session.sessionId,
+        sessionId,
         toolName,
         args: params as Record<string, unknown>,
         success: false,
@@ -81,7 +82,8 @@ export function registerTools(server: MCPServer): void {
     },
     withLogging("ping_agent", async (_params, ctx) => {
       const clientInfo = ctx.client.info();
-      recordMcpClient(ctx.session.sessionId, clientInfo.name ?? "unknown", clientInfo.version);
+      const sid = ctx?.session?.sessionId ?? "unknown";
+      recordMcpClient(sid, clientInfo.name ?? "unknown", clientInfo.version);
 
       await ctx.log("info", "ping_agent");
       const p = config.providers.find((x) => x.id === config.activeProviderId);
@@ -93,7 +95,7 @@ export function registerTools(server: MCPServer): void {
         `max_steps       : ${config.agentMaxSteps}`,
         `temperature     : ${config.agentTemperature}`,
         `providers       : ${config.providers.length} configured`,
-        `mcp_session     : ${ctx.session.sessionId}`,
+        `mcp_session     : ${ctx?.session?.sessionId ?? "unknown"}`,
         `client          : ${clientInfo.name ?? "unknown"} ${clientInfo.version ?? ""}`,
       ].join("\n"));
     })
@@ -173,7 +175,8 @@ export function registerTools(server: MCPServer): void {
       ctx
     ) => {
       const clientInfo = ctx.client.info();
-      recordMcpClient(ctx.session.sessionId, clientInfo.name ?? "unknown", clientInfo.version);
+      const sid = ctx?.session?.sessionId ?? "unknown";
+      recordMcpClient(sid, clientInfo.name ?? "unknown", clientInfo.version);
 
       await ctx.log("info", `run_agent: provider=${provider_id ?? config.activeProviderId}`);
 
