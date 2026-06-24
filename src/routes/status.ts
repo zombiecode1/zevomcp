@@ -2,6 +2,13 @@ import { MCPServer } from "mcp-use/server";
 import { config } from "../config.js";
 import { getAllProviderStatuses } from "../providers/registry.js";
 import { listActiveSessions, createSession, heartbeatSession } from "../session/manager.js";
+import {
+  findClientSessionByCode,
+  approveClientSession,
+  rejectClientSession,
+  listClientSessions,
+  expireStaleClientSessions,
+} from "../session/client-session.js";
 import { getRecentRuns } from "../agent/runner.js";
 import { getDb } from "../db/index.js";
 import { IDENTITY } from "../agent/identity.js";
@@ -178,6 +185,98 @@ export function registerStatusRoutes(server: MCPServer): void {
   });
 
   app.get("/dashboard", (c) => c.html(dashboardHtml(port)));
+
+  // ── /verify/:code — Browser verification page ──────────────────────────
+  app.get("/verify/:code", (c) => {
+    const code = c.req.param("code")?.toUpperCase();
+    if (!code) return c.text("Missing verification code.", 400);
+
+    const session = findClientSessionByCode(code);
+    if (!session) {
+      return c.html(`<!DOCTYPE html>
+<html lang="bn"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ZombieCoder — Verification</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#c9d1d9;font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh}
+.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px;max-width:480px;width:90%;text-align:center}
+.ic{font-size:48px;margin-bottom:16px}
+h1{font-size:20px;margin-bottom:8px}
+p{color:#8b949e;line-height:1.5}
+.btn{display:inline-block;margin-top:16px;padding:10px 24px;border-radius:6px;border:none;cursor:pointer;font-size:14px}
+.btn-warn{background:#d29922;color:#fff;text-decoration:none}
+</style></head>
+<body><div class="card"><div class="ic">⚠️</div>
+<h1>Code Expired or Invalid</h1>
+<p>This verification code is invalid, expired, or already used.<br>Please reconnect your editor to get a new code.</p>
+<a href="/dashboard" class="btn btn-warn">Go to Dashboard</a>
+</div></body></html>`);
+    }
+
+    const clientName = session.clientName;
+    const verifiedAt = session.verifiedAt;
+    const isVerified = session.status === "verified";
+    const isExpired = session.expiresAt < Math.floor(Date.now() / 1000);
+
+    return c.html(verifyPageHtml(code, clientName, session.clientVersion ?? "", isVerified, isExpired));
+  });
+
+  // Approve API
+  app.post("/verify/:code/approve", (c) => {
+    const code = c.req.param("code")?.toUpperCase();
+    if (!code) return c.json({ error: "Missing code" }, 400);
+
+    const session = findClientSessionByCode(code);
+    if (!session) return c.json({ error: "Invalid or expired code" }, 404);
+    if (session.expiresAt < Math.floor(Date.now() / 1000)) {
+      return c.json({ error: "Code expired" }, 410);
+    }
+
+    const ok = approveClientSession(session.id);
+    return c.json({
+      ok,
+      client: session.clientName,
+      client_id: session.clientId,
+      status: "verified",
+      ts: new Date().toISOString(),
+    });
+  });
+
+  // Reject API
+  app.post("/verify/:code/reject", (c) => {
+    const code = c.req.param("code")?.toUpperCase();
+    if (!code) return c.json({ error: "Missing code" }, 400);
+
+    const session = findClientSessionByCode(code);
+    if (!session) return c.json({ error: "Invalid code" }, 404);
+
+    const ok = rejectClientSession(session.id);
+    return c.json({
+      ok,
+      client: session.clientName,
+      status: "disconnected",
+      ts: new Date().toISOString(),
+    });
+  });
+
+  // ── /verify — list all pending verifications ───────────────────────────
+  app.get("/verify", (c) => {
+    const all = listClientSessions();
+    return c.json({
+      pending: all.filter(s => s.status === "pending").length,
+      verified: all.filter(s => s.status === "verified").length,
+      disconnected: all.filter(s => s.status === "disconnected").length,
+      sessions: all.map(s => ({
+        id: s.id.slice(0, 8) + "…",
+        client: s.clientName,
+        version: s.clientVersion,
+        status: s.status,
+        code: s.verificationCode,
+        connected: new Date(s.connectedAt * 1000).toISOString(),
+        expires: new Date(s.expiresAt * 1000).toISOString(),
+      })),
+      ts: new Date().toISOString(),
+    });
+  });
 }
 
 function dashboardHtml(port: number): string {
@@ -359,4 +458,142 @@ async function refresh(){
 })();
 </script>
 </body></html>`;
+}
+
+function verifyPageHtml(
+  code: string,
+  clientName: string,
+  clientVersion: string,
+  isVerified: boolean,
+  isExpired: boolean,
+): string {
+  if (isVerified) {
+    return `<!DOCTYPE html>
+<html lang="bn"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>✓ Verified — ZombieCoder</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#c9d1d9;font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh}
+.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px;max-width:480px;width:90%;text-align:center}
+.ic{font-size:48px;margin-bottom:16px}
+h1{font-size:20px;margin-bottom:8px;color:#3fb950}
+p{color:#8b949e;line-height:1.5;margin-bottom:8px}
+.detail{color:#58a6ff;font-weight:700}
+.btn{display:inline-block;margin-top:16px;padding:10px 24px;border-radius:6px;border:none;cursor:pointer;font-size:14px;text-decoration:none}
+.btn-primary{background:#238636;color:#fff}
+</style></head>
+<body><div class="card"><div class="ic">✅</div>
+<h1>Client Verified!</h1>
+<p><span class="detail">${escHtml(clientName)} ${escHtml(clientVersion)}</span> is now connected and verified.</p>
+<p>You can close this tab and return to your editor.</p>
+<a href="/dashboard" class="btn btn-primary">Go to Dashboard</a>
+</div></body></html>`;
+  }
+
+  if (isExpired) {
+    return `<!DOCTYPE html>
+<html lang="bn"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Expired — ZombieCoder</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#c9d1d9;font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh}
+.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px;max-width:480px;width:90%;text-align:center}
+.ic{font-size:48px;margin-bottom:16px}
+h1{font-size:20px;margin-bottom:8px;color:#d29922}
+p{color:#8b949e;line-height:1.5}
+.btn{display:inline-block;margin-top:16px;padding:10px 24px;border-radius:6px;border:none;cursor:pointer;font-size:14px;text-decoration:none}
+.btn-warn{background:#d29922;color:#fff}
+</style></head>
+<body><div class="card"><div class="ic">⏰</div>
+<h1>Verification Expired</h1>
+<p>This verification code has expired. Please reconnect your editor to generate a new one.</p>
+<a href="/dashboard" class="btn btn-warn">Dashboard</a>
+</div></body></html>`;
+  }
+
+  // Pending — show approve/reject
+  return `<!DOCTYPE html>
+<html lang="bn"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Approve Client — ZombieCoder</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#c9d1d9;font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh}
+.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px;max-width:480px;width:90%;text-align:center}
+.ic{font-size:48px;margin-bottom:16px}
+h1{font-size:20px;margin-bottom:4px}
+.code{font-size:32px;letter-spacing:6px;color:#58a6ff;font-weight:700;margin:12px 0;font-family:'Courier New',monospace}
+p{color:#8b949e;line-height:1.5;margin-bottom:4px}
+.client-name{color:#c9d1d9;font-weight:700}
+.btn-group{display:flex;gap:12px;justify-content:center;margin-top:20px}
+.btn{padding:12px 32px;border-radius:8px;border:none;cursor:pointer;font-size:15px;font-weight:600;transition:opacity .2s}
+.btn:hover{opacity:.9}
+.btn-approve{background:#238636;color:#fff}
+.btn-reject{background:#da3633;color:#fff}
+.status{padding:8px 16px;border-radius:6px;margin-top:16px;font-size:13px;display:none}
+.status-ok{background:#1a4731;color:#3fb950;border:1px solid #238636}
+.status-err{background:#4a1a1a;color:#f85149;border:1px solid #da3633}
+</style></head>
+<body>
+<div class="card">
+  <div class="ic">🔌</div>
+  <h1>Approve Client Connection</h1>
+  <p>A client wants to connect to <span style="color:#3fb950">ZombieCoder MCP</span>:</p>
+  <div class="code">${escHtml(code)}</div>
+  <p class="client-name">${escHtml(clientName)} ${escHtml(clientVersion)}</p>
+  <p style="font-size:13px;color:#8b949e">Only approve if you recognise this client and initiated this connection.</p>
+
+  <div class="btn-group">
+    <button class="btn btn-approve" onclick="approve('${escHtml(code)}')">✓ Approve</button>
+    <button class="btn btn-reject" onclick="reject('${escHtml(code)}')">✗ Reject</button>
+  </div>
+
+  <div id="status" class="status"></div>
+</div>
+
+<script>
+async function approve(code) {
+  const btn = document.querySelector('.btn-approve');
+  btn.disabled = true; btn.textContent = 'Processing…';
+  try {
+    const r = await fetch('/verify/' + code + '/approve', { method: 'POST' });
+    const j = await r.json();
+    if (j.ok) {
+      showStatus('✓ Verified! You can close this tab.', 'ok');
+      btn.textContent = '✓ Approved';
+    } else {
+      showStatus('✗ ' + (j.error || 'Approval failed'), 'err');
+      btn.disabled = false; btn.textContent = '✓ Approve';
+    }
+  } catch(e) {
+    showStatus('✗ Network error: ' + e.message, 'err');
+    btn.disabled = false; btn.textContent = '✓ Approve';
+  }
+}
+async function reject(code) {
+  const btn = document.querySelector('.btn-reject');
+  btn.disabled = true; btn.textContent = 'Processing…';
+  try {
+    const r = await fetch('/verify/' + code + '/reject', { method: 'POST' });
+    const j = await r.json();
+    if (j.ok) {
+      showStatus('✗ Disconnected. Client rejected.', 'err');
+      btn.textContent = '✗ Rejected';
+    } else {
+      showStatus('✗ ' + (j.error || 'Rejection failed'), 'err');
+      btn.disabled = false; btn.textContent = '✗ Reject';
+    }
+  } catch(e) {
+    showStatus('✗ Network error: ' + e.message, 'err');
+    btn.disabled = false; btn.textContent = '✗ Reject';
+  }
+}
+function showStatus(msg, type) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = 'status status-' + type;
+  el.style.display = 'block';
+}
+</script>
+</body></html>`;
+}
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }

@@ -21,6 +21,7 @@ export interface RunAgentOptions {
   servers?: Record<string, McpServerDef>;
   appSessionId?: string;
   mcpSessionId?: string;
+  conversationId?: string;
   systemPromptOverride?: string;
   onStep?: (tool: string, input: unknown) => void;
 }
@@ -54,12 +55,13 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   const db = getDb();
   db.prepare(`
     INSERT INTO agent_runs
-      (id, app_session_id, mcp_session_id, provider_id, model, prompt, streaming)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+      (id, app_session_id, mcp_session_id, conversation_id, provider_id, model, prompt, streaming)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     runId,
     opts.appSessionId ?? null,
     opts.mcpSessionId ?? null,
+    opts.conversationId ?? null,
     provider.id,
     model,
     opts.prompt,

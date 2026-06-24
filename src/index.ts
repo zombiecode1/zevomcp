@@ -3,6 +3,7 @@ import { config } from "./config.js";
 import { getDb } from "./db/index.js";
 import { syncProviders, checkAllProviders } from "./providers/registry.js";
 import { expireStaleSessions } from "./session/manager.js";
+import { expireStaleClientSessions } from "./session/client-session.js";
 import { registerTools } from "./tools/index.js";
 import { registerStatusRoutes } from "./routes/status.js";
 import { registerProxyRoutes } from "./routes/proxy.js";
@@ -79,8 +80,12 @@ async function main(): Promise<void> {
   const expired = expireStaleSessions();
   if (expired > 0) console.log(`✓ Cleared ${expired} stale dashboard session(s)`);
 
+  const expiredClients = expireStaleClientSessions();
+  if (expiredClients > 0) console.log(`✓ Cleared ${expiredClients} stale client session(s)`);
+
   setInterval(() => {
     expireStaleSessions();
+    expireStaleClientSessions();
   }, 10 * 60 * 1000);
 
   const isStdio = process.env["MCP_STDIO_MODE"] === "true";
