@@ -4,6 +4,7 @@ import { getAllProviderStatuses } from "../providers/registry.js";
 import { listActiveSessions, createSession, heartbeatSession } from "../session/manager.js";
 import {
   findClientSessionByCode,
+  findClientSessionByCodeAny,
   approveClientSession,
   rejectClientSession,
   listClientSessions,
@@ -90,6 +91,21 @@ export function registerStatusRoutes(server: MCPServer): void {
         editors,
         historical: db.prepare(`SELECT * FROM mcp_clients ORDER BY connected_at DESC LIMIT 50`).all(),
       },
+      client_sessions: listClientSessions().map(s => ({
+        id: s.id.slice(0, 8) + "…",
+        client_id: s.clientId.slice(0, 12) + "…",
+        client_name: s.clientName,
+        client_version: s.clientVersion,
+        client_type: s.clientType,
+        status: s.status,
+        code: s.verificationCode,
+        connected: new Date(s.connectedAt * 1000).toISOString(),
+        expires: new Date(s.expiresAt * 1000).toISOString(),
+        expires_in_min: Math.round((s.expiresAt - Date.now() / 1000) / 60),
+        heartbeat: new Date(s.lastHeartbeat * 1000).toISOString(),
+        conversations: s.conversationCount,
+        type: s.clientType,
+      })),
       run_stats: db.prepare(`
         SELECT status, COUNT(*) AS count, ROUND(AVG(completed_at - started_at), 1) AS avg_s
         FROM agent_runs GROUP BY status
@@ -129,6 +145,12 @@ export function registerStatusRoutes(server: MCPServer): void {
       run_stats: getDb().prepare(`SELECT status, COUNT(*) AS count FROM agent_runs GROUP BY status`).all(),
       memory_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
       uptime_sec: Math.round(process.uptime()),
+      client_sessions: {
+        total: getDb().prepare(`SELECT COUNT(*) AS c FROM client_sessions`).get() as any,
+        pending: getDb().prepare(`SELECT COUNT(*) AS c FROM client_sessions WHERE status = 'pending'`).get() as any,
+        verified: getDb().prepare(`SELECT COUNT(*) AS c FROM client_sessions WHERE status = 'verified'`).get() as any,
+        disconnected: getDb().prepare(`SELECT COUNT(*) AS c FROM client_sessions WHERE status = 'disconnected'`).get() as any,
+      },
     });
   });
 
@@ -191,7 +213,7 @@ export function registerStatusRoutes(server: MCPServer): void {
     const code = c.req.param("code")?.toUpperCase();
     if (!code) return c.text("Missing verification code.", 400);
 
-    const session = findClientSessionByCode(code);
+    const session = findClientSessionByCodeAny(code);
     if (!session) {
       return c.html(`<!DOCTYPE html>
 <html lang="bn"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -212,18 +234,25 @@ p{color:#8b949e;line-height:1.5}
 </div></body></html>`);
     }
 
-    const clientName = session.clientName;
-    const verifiedAt = session.verifiedAt;
     const isVerified = session.status === "verified";
     const isExpired = session.expiresAt < Math.floor(Date.now() / 1000);
 
-    return c.html(verifyPageHtml(code, clientName, session.clientVersion ?? "", isVerified, isExpired));
+    return c.html(verifyPageHtml(code, session.clientName, session.clientVersion ?? "", isVerified, isExpired));
   });
 
   // Approve API
   app.post("/verify/:code/approve", (c) => {
     const code = c.req.param("code")?.toUpperCase();
     if (!code) return c.json({ error: "Missing code" }, 400);
+
+    // First check if already verified
+    const existing = findClientSessionByCodeAny(code);
+    if (existing && existing.status === "verified") {
+      return c.json({ ok: false, reason: "already_verified", status: "verified" });
+    }
+    if (existing && existing.expiresAt < Math.floor(Date.now() / 1000)) {
+      return c.json({ error: "Code expired" }, 410);
+    }
 
     const session = findClientSessionByCode(code);
     if (!session) return c.json({ error: "Invalid or expired code" }, 404);
@@ -312,6 +341,11 @@ section h2{padding:9px 14px;font-size:11px;text-transform:uppercase;letter-spaci
 .cl-box{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
 .cl-editor{padding:4px 10px;border-radius:12px;font-size:11px;background:#1a2d4a;border:1px solid #1f4068}
 .cl-count{font-weight:700;color:var(--bl)}
+.sb-pending{color:var(--yw)}.sb-verified{color:var(--gr)}.sb-disconnected{color:var(--rd)}.sb-expired{color:var(--dm)}
+.sb{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;margin-left:4px}
+.sb0{background:#4a3a1a;color:var(--yw)}.sb1{background:#1a4731;color:var(--gr)}.sb2{background:#4a1a1a;color:var(--rd)}.sb3{background:#1a1d24;color:var(--dm)}
+.c-act{font-size:11px}.c-act button{background:0;border:1px solid var(--bd);color:var(--bl);cursor:pointer;padding:2px 8px;border-radius:3px;margin:0 2px;font-size:10px}
+.c-act button:hover{border-color:var(--bl)}.c-act .b-ap{color:var(--gr);border-color:#238636}.c-act .b-rj{color:var(--rd);border-color:#da3633}
 footer{text-align:center;padding:10px;color:var(--dm);font-size:11px}
 .warn{color:var(--rd);font-weight:700}
 .ok{color:var(--gr)}
@@ -331,6 +365,7 @@ footer{text-align:center;padding:10px;color:var(--dm);font-size:11px}
   <section><h2>🔐 Authentication</h2><div id="auth" class="c"><p style="color:var(--dm)">loading…</p></div></section>
   <section style="grid-column:1/-1"><h2>Providers &amp; Models <span id="prov-count" style="color:var(--dm);font-size:11px">0 online</span></h2><div id="pv" class="c"><p style="color:var(--dm)">loading…</p></div></section>
   <section><h2>MCP Clients <span id="mcp-count" style="color:var(--dm);font-size:11px">0</span></h2><div id="cl" class="c"><p style="color:var(--dm)">loading…</p></div></section>
+  <section style="grid-column:1/-1"><h2>🔌 Client Sessions <span id="cs-count" style="color:var(--dm);font-size:11px">0</span></h2><div id="cs" class="c"><p style="color:var(--dm)">loading…</p></div></section>
   <section><h2>System <span style="color:var(--dm);font-size:11px">node ${process.version}</span></h2><div id="sys" class="c"><p style="color:var(--dm)">loading…</p></div></section>
   <section style="grid-column:1/-1"><h2>Recent Agent Runs</h2><div id="runs" class="c"><p style="color:var(--dm)">loading…</p></div></section>
 </main>
@@ -423,6 +458,40 @@ async function refresh(){
       ).join('')+'<div style="color:var(--dm);font-size:11px;margin-top:6px">App sessions: '+d.app_sessions.active+'</div>':'<p style="color:var(--dm)">No live clients</p>')+
       d.app_sessions.list.slice(0,5).map(s=>'<div class="run" style="font-size:11px"><span style="color:var(--bl)">'+s.id.slice(0,8)+'…</span> '+
       (s.provider||'default')+' | '+(s.directory||'?')+' | '+s.expires_in+(s.expired?' <span class="warn">expired</span>':'')+'</div>').join('');
+
+    // Client Sessions
+    const cs = d.client_sessions || [];
+    document.getElementById('cs-count').textContent = cs.length + ' session(s)';
+    let csHtml = '';
+    const statusMap = { pending: 0, verified: 1, disconnected: 2, expired: 3 };
+    const statusLabel = { 0: '⏳ PENDING', 1: '✓ VERIFIED', 2: '✗ DISCONNECTED', 3: '⌛ EXPIRED' };
+    const statusClass = { 0: 'sb0', 1: 'sb1', 2: 'sb2', 3: 'sb3' };
+    if (cs.length) {
+      csHtml += cs.map(s => {
+        const st = statusMap[s.status] ?? 3;
+        const label = statusLabel[st];
+        const cls = statusClass[st];
+        let actions = '';
+        if (s.status === 'pending') {
+          var codeVal = s.code;
+          actions = '<div class="c-act">' +
+            '<button class="b-ap" onclick="fetch(\'/verify/' + codeVal + '/approve\',{method:\'POST\'}).then(function(r){return r.json();}).then(function(j){if(j.ok){location.reload();}})">✓ Approve</button>' +
+            '<button class="b-rj" onclick="fetch(\'/verify/' + codeVal + '/reject\',{method:\'POST\'}).then(function(r){return r.json();}).then(function(j){if(j.ok){location.reload();}})">✗ Reject</button>' +
+            ' <span style="color:var(--yw);font-size:10px">code: ' + s.code + '</span>' +
+            '</div>';
+        } else if (s.status === 'verified') {
+          actions = '<div class="c-act"><span style="color:var(--gr)">●</span> ' + s.conversations + ' convs</div>';
+        }
+        return '<div class="run"><span class="sb ' + cls + '">' + label + '</span> ' +
+          '<span style="color:var(--bl)">' + s.client_name + '</span> ' +
+          (s.client_version || '') + ' <span style="color:var(--dm);font-size:10px">' +
+          (s.client_type || '') + ' · id: ' + s.client_id + ' · ' +
+          s.expires_in_min + 'm left</span>' + actions + '</div>';
+      }).join('');
+    } else {
+      csHtml = '<p style="color:var(--dm)">No client sessions yet. Connect an editor!</p>';
+    }
+    document.getElementById('cs').innerHTML = csHtml;
 
     // System
     document.getElementById('sys').innerHTML=

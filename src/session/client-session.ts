@@ -141,6 +141,17 @@ export function findClientSessionByCode(code: string): ClientSession | null {
 }
 
 /**
+ * Look up a session by its verification_code regardless of status.
+ * Used by the verification page to show "already verified" state.
+ */
+export function findClientSessionByCodeAny(code: string): ClientSession | null {
+  const row = getDb().prepare(
+    `SELECT * FROM client_sessions WHERE verification_code = ? LIMIT 1`
+  ).get(code) as unknown as ClientSessionRow | undefined;
+  return row ? toClientSession(row) : null;
+}
+
+/**
  * Extend the session TTL + update heartbeat.
  */
 export function heartbeatClientSession(id: string): boolean {
